@@ -3,6 +3,8 @@ import numpy as np
 from torch import nn
 import torch.nn.functional as F
 
+
+# step 1
 #关于word embedding,以序列建模为例
 #考虑source sentence 和target sentence
 #构建序列，序列的字符以其在词表中的索引表示
@@ -31,9 +33,9 @@ src_embedding_table = nn.Embedding(max_num_src_words, model_dim)
 tgt_embedding_table = nn.Embedding(max_num_tgt_words, model_dim)
 src_embedding = src_embedding_table(src_seq)
 tgt_embedding = tgt_embedding_table(tgt_seq)
-# #word embedding
 
 
+# step 2
 #构造position embedding
 # 在位置编码中，pos 代表的是行，i 代表的是列
 #位置编码简易版
@@ -54,9 +56,9 @@ src_pe_embedding = pe_embedding(src_pos)
 tgt_pe_embedding = pe_embedding(tgt_pos)
 # print(src_pe_embedding)
 # print(tgt_pe_embedding)
-# #位置编码
 
 
+# step 3
 # 构造encode中self-attention mask
 # mask shape: [batch, max_src_len, max_src_len],值为1或-inf
 valid_encoder_pos =torch.unsqueeze(torch.cat([torch.unsqueeze(F.pad(torch.ones(L), (0, max(src_len) - L)), 0) for L in src_len], 0), 2)
@@ -68,4 +70,77 @@ mask_encoder_self_attention = invalid_encoder_pos_matrix.to(torch.bool)
 score = torch.randn(batch_size, max(src_len), max(src_len))
 masked_score = score.masked_fill(mask_encoder_self_attention, -np.inf)
 prob = F.softmax(masked_score, -1)
+# print(prob)
+
+
+
+# step 4
+# 构造intra_attention_mask   对任何Padding的部分不做attention
+# Q * K^T  shape:[batch_size, tgt_seq_len, src_seq_len]
+valid_encoder_pos =torch.unsqueeze(torch.cat([torch.unsqueeze(F.pad(torch.ones(L), (0, max(src_len) - L)), 0) for L in src_len], 0), 2)
+valid_decoder_pos =torch.unsqueeze(torch.cat([torch.unsqueeze(F.pad(torch.ones(L), (0, max(tgt_len) - L)), 0) for L in tgt_len], 0), 2)
+# 计算encoder中scr句子和decoder中tgt句子的邻接矩阵,得到的是目标句子的每个单词对源句子的有效性
+valid_cross_pos_matrix = torch.bmm(valid_decoder_pos, valid_encoder_pos.transpose(-1, -2) )
+
+# print(valid_encoder_pos)
+# print(valid_decoder_pos)
+# print(valid_cross_pos_matrix)
+'''
+源句子中单词数目
+tensor([[[1.],
+         [1.],
+         [0.],
+         [0.]],
+
+        [[1.],
+         [1.],
+         [1.],
+         [1.]]])
+目标句子中单词数目
+tensor([[[1.],
+         [1.],
+         [1.],
+         [1.]],
+
+        [[1.],
+         [1.],
+         [1.],
+         [0.]]])
+目标句子中的单词对源句子的有效性
+矩阵一第一行表示的是 tgt中第一句话中第一个单词对src第一个句子的有效性
+矩阵二第三行表示的是 tgt中第二句话中第三个单词对src第二个句子的有效性
+tensor([[[1., 1., 0., 0.],
+         [1., 1., 0., 0.],
+         [1., 1., 0., 0.],
+         [1., 1., 0., 0.]],
+
+        [[1., 1., 1., 1.],
+         [1., 1., 1., 1.],
+         [1., 1., 1., 1.],
+         [0., 0., 0., 0.]]])
+'''
+invalid_cross_pos_matrix = 1 - valid_cross_pos_matrix
+mask_cross_attention = invalid_cross_pos_matrix.to(torch.bool)  
+# print(mask_cross_attention)
+
+
+
+# step 5:构造decoder self_attention的mask
+valid_decoder_tri_matrix = torch.cat([torch.unsqueeze(F.pad(torch.tril(torch.ones(L, L)), (0, max(tgt_len)-L, 0, max(tgt_len)-L)), 0) for L in tgt_len], 0)
+print(valid_decoder_tri_matrix) #decoder 第一行表示 第一个输入对decoder序列整体的相关性
+invalid_decoder_tri_matrix = 1-valid_decoder_tri_matrix
+invalid_decoder_tri_matrix = invalid_decoder_tri_matrix.to(torch.bool)
+print(invalid_decoder_tri_matrix)
+score =  torch.randn(batch_size, max(tgt_len), max(tgt_len))
+masked_score = score.masked_fill(invalid_decoder_tri_matrix, -1e9)
+prob = F.softmax(masked_score, -1)
 print(prob)
+
+# step 6:构建self_attention
+def scaled_dot_product_attention(Q, K, V, attn_mask):
+    # shape of Q,K,V :[batch_size*num_head, seq_len, model_dim/num_head]
+    score = torch.bmm(Q, K.transpose(-1,-2))/torch.sqrt(model_dim)
+    masked_score = score.masked_fill(attn_mask, -1e9)
+    prob = F.softmax(masked_score, -1)
+    context = torch.bmm(prob, V)
+    return context
