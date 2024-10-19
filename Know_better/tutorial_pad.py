@@ -1,5 +1,5 @@
 '''
-torch.pad 是倒着padding,注意是对哪一维padding
+torch.pad 是倒着padding,注意是对哪一维padding  参数就是 左右上下前后
 '''
 import torch
 import torch.nn.functional as F
